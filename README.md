@@ -144,6 +144,14 @@ SMOKE TEST OK - ran 200 frames without exception, observed life loss, difficulty
   both a missing file and a non-numeric contents, so a first run or a
   corrupted file doesn't crash the game, it just starts the high score at
   0.
+- **A TikZ node name collided with a built-in key while building the
+  explainer PDFs.** The main-loop diagram in `docs/explainers/deep-dive.pdf`
+  originally named its flowchart node style `step`, which silently collides
+  with TikZ's own `/tikz/step` key (used for grid spacing); `pdflatex` failed
+  with a wall of `pgfkeys Error: The key '/tikz/step' requires a value`
+  errors instead of drawing the diagram. Renaming the style to `flowstep`
+  fixed it, a reminder that TikZ's style namespace overlaps with its option
+  namespace, so short, generic style names aren't actually safe to reuse.
 
 ## What I learned
 
