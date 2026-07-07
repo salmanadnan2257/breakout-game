@@ -1,0 +1,4 @@
+# No third-party dependencies.
+# The game uses only Python's standard library: turtle (built on tkinter) and time.
+# On Debian/Ubuntu, if `import tkinter` fails, install the system package:
+#   sudo apt-get install python3-tk
