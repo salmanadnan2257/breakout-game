@@ -1,0 +1,272 @@
+% explainer-source-hash: 52c32d41dd9ee9308816b0ea13c8f6fd4352d582538ab1ea52c82ccf33c17cf5
+% explainer-source-commit: 4226652b05a73b52389e480fbcab2170bbee92a3
+% explainer-generated: 2026-07-16
+% Regenerate with /explain-all (see WIRING.md). Do not edit this stamp by hand:
+% it is how the toolchain knows whether this document still matches the code.
+\documentclass[11pt,a4paper]{article}
+\input{preamble}
+
+\title{\vspace{-1.5cm}\textbf{Breakout Game}\\[0.3cm]
+\large The Brief: What It Is, How It Works, What Is Wrong With It}
+\author{Portfolio explainer: high-level summary}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\section{The project in one paragraph}
+
+\file{breakout-game} is a clone of the 1976 arcade game Breakout: a paddle, a bouncing
+ball, a wall of coloured blocks, three lives, and a persistent high score. It is 475 lines
+of Python across five modules and it uses \textbf{nothing but the standard library}. The
+point of the project is what it refuses to use: there is no game engine, so the frame loop,
+the collision detection, the state machine and the difficulty curve are all written by hand
+on top of \code{turtle}, a children's drawing module that was never meant to carry a game.
+
+\begin{keyidea}{Why that constraint is the whole story}
+An engine like Pygame or Godot hands you a render loop, sprites and collision tests already
+solved. Removing it means writing each of them yourself, which is the exercise. Everything
+interesting in this codebase, and every bug in it, lives in the parts an engine would have
+hidden.
+\end{keyidea}
+
+\section{Architecture}
+
+\file{main.py} owns the loop and the game state. The other four modules are passive: they
+only act when the loop calls a method on them, and none of them knows a frame exists.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.96\textwidth}{!}{
+\begin{tikzpicture}
+  \node[box, minimum width=50mm] (main) {\textbf{main.py} \ (134)\\Screen, state machine, frame loop};
+  \node[extbox, above=12mm of main] (turtle) {Python stdlib: \code{turtle} (on \code{tkinter})};
+
+  \node[box, minimum width=30mm] at ([xshift=-65mm]$(main.south)+(0,-30mm)$) (paddle)
+    {\textbf{paddle.py} \ (34)\\keys, clamping};
+  \node[box, minimum width=30mm] at ([xshift=-21mm]$(main.south)+(0,-30mm)$) (ball)
+    {\textbf{ball.py} \ (102)\\velocity, wall + paddle\\collisions, difficulty};
+  \node[box, minimum width=30mm] at ([xshift=21mm]$(main.south)+(0,-30mm)$) (blocks)
+    {\textbf{blocks.py} \ (147)\\wall layout, block\\collisions, effects};
+  \node[box, minimum width=30mm] at ([xshift=65mm]$(main.south)+(0,-30mm)$) (score)
+    {\textbf{scoreboard.py} \ (58)\\score, lives};
+  \node[store, below=14mm of score] (file) {highestScore\\.txt};
+
+  \draw[dflow] (turtle) -- (main);
+  \draw[flow] (main.south) -- (ball.north);
+  \draw[flow] (main.south) -- (paddle.north);
+  \draw[flow] (main.south) -- (blocks.north);
+  \draw[flow] (main.south) -- (score.north);
+  \draw[flow] (blocks.south) to[out=-90,in=-90] node[lbl,below]{\code{.increase\_score()}} (score.south);
+  \draw[flow] (score.east) to[out=0,in=0] node[lbl,right]{read at import,\\write at game end} (file.east);
+  \draw[flow] (ball.south) to[out=-90,in=-90] node[lbl,below]{reads \code{paddle.xcor()}} (paddle.south);
+\end{tikzpicture}}
+\caption{Five modules, line counts measured. The split is by \emph{collision problem}: ball
+versus wall, ball versus paddle and ball versus block are three different shapes of maths,
+and each lives with the object that owns it.}
+\end{figure}
+
+\section{How a frame works}
+
+\begin{figure}[H]
+\centering
+\resizebox{0.88\textwidth}{!}{
+\begin{tikzpicture}[node distance=6mm,
+  flowstep/.style={rectangle, rounded corners=2pt, draw=inkblue, fill=softgrey,
+                   text=inkblue, align=center, inner sep=4pt, minimum height=7mm,
+                   minimum width=52mm, font=\small}]
+  \node[flowstep, fill=white, draw=linegrey] (top) {\code{while True:} \ \ \ \ \code{wn.update()}};
+  \node[dec, below=8mm of top, minimum width=20mm] (st) {state ==\\``playing''?};
+  \node[flowstep, below=10mm of st] (phys) {\textbf{move} the ball \ \code{(x+=dx, y+=dy)}};
+  \node[flowstep, below=of phys] (coll) {\textbf{collide}: blocks, walls, paddle, blocks again};
+  \node[flowstep, below=of coll] (fx) {\textbf{advance} flash + particle effects};
+  \node[dec, below=9mm of fx, minimum width=22mm] (end) {wall cleared?\\ball below -280?};
+  \node[flowstep, below=9mm of end, draw=warnred] (res) {save high score, show end screen,\\or lose a life and re-centre};
+  \node[flowstep, left=22mm of st, draw=linegrey] (idle) {effects only,\\no physics};
+
+  \draw[flow] (top) -- (st);
+  \draw[flow] (st) -- node[lbl,right]{yes} (phys);
+  \draw[flow] (st) -- node[lbl,above]{no} (idle);
+  \draw[flow] (phys) -- (coll); \draw[flow] (coll) -- (fx); \draw[flow] (fx) -- (end);
+  \draw[flow] (end) -- node[lbl,right]{yes} (res);
+  \draw[flow] (end.west) -- node[lbl,above]{no} ++(-3.6,0) |- (idle.south);
+  \draw[flow] (idle.north) -- ++(0,0.5) -| (top.west);
+\end{tikzpicture}}
+\caption{One frame of \file{main.py}. Physics runs only in the \code{playing} state; the
+other states still spin the loop so the window stays responsive to a keypress.}
+\end{figure}
+
+\begin{keyidea}{The one line that makes it a game}
+\code{wn.tracer(0)} switches off turtle's redraw-after-every-command behaviour, and the loop
+calls \code{wn.update()} exactly once per pass. That converts turtle from ``draw each change
+instantly and slowly'' into proper frame-based rendering: move everything invisibly, then
+present one complete image. It is the single non-obvious idea in the project.
+\end{keyidea}
+
+\subsection{State machine}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=20mm]
+  \node[box] (start) {\textbf{start}};
+  \node[box, right=of start] (playing) {\textbf{playing}};
+  \node[box, above right=10mm and 16mm of playing] (won) {\textbf{won}};
+  \node[box, below right=10mm and 16mm of playing] (over) {\textbf{game\_over}};
+  \draw[flow] (start) -- node[lbl,above]{\code{space}} (playing);
+  \draw[flow] (playing) -- node[lbl,above left=-2mm and -3mm]{wall cleared} (won);
+  \draw[flow] (playing) -- node[lbl,below left=-2mm and -3mm]{last life lost} (over);
+  \draw[flow] (won.north) to[out=100,in=60, looseness=1.4] node[lbl,above]{\code{r}} (start.north);
+  \draw[flow] (over.south) to[out=-100,in=-60, looseness=1.2] node[lbl,below]{\code{r}} (start.south);
+\end{tikzpicture}
+\caption{Four states held in one string variable. Both key callbacks are guarded, so
+\code{r} is a no-op mid-rally and \code{space} is a no-op on the end screen.}
+\end{figure}
+
+\section{The three collision rules}
+
+\begin{center}
+\begin{tabular}{@{}p{0.19\textwidth}p{0.31\textwidth}p{0.42\textwidth}@{}}
+\toprule
+\textbf{Collision} & \textbf{Test} & \textbf{Response} \\
+\midrule
+Ball vs.\ wall & \code{|x| > 390} or \code{|y| > 290} & clamp back onto the boundary, then
+flip that axis. The clamp matters: flipping alone leaves the ball outside the wall, where it
+vibrates forever. \\
+\addlinespace
+Ball vs.\ paddle & \code{y < -240} \emph{and} within 80 units of the paddle's centre &
+clamp to \code{y = -240}, flip \code{dy}, count the hit. Directional on purpose: a ball
+moving upward passes through, which is what stops it sticking to the paddle. \\
+\addlinespace
+Ball vs.\ block & \code{block.distance(ball) < 35} & score, remove, flash white, burst, flip
+\code{dy}. Turtle has no rectangle intersection test, so a fixed radius stands in for every
+block's true hitbox. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{The rest of the design}
+
+\begin{itemize}
+  \item \textbf{Wall generation} (\file{blocks.py}) packs randomly-sized blocks right to
+        left from $x = 400$, wraps down 20 units when the next will not fit, and stops when
+        it runs out of vertical room. Each row's colour comes from its $y$ position, so the
+        wall reads as bands rather than a speckle.
+  \item \textbf{Difficulty ramp}: every 4th paddle return multiplies both velocity
+        components by 1.08. Multiplying rather than adding preserves direction, which is why
+        it is written that way.
+  \item \textbf{Two resets}, and the distinction is a real design decision: losing a life
+        keeps the current speed (a setback), while restarting after game over drops back to
+        base speed.
+  \item \textbf{Break feedback}: a broken block flashes white for 3 frames while five
+        particle turtles fly outward on random angles, driven by a frame countdown rather
+        than any physics.
+  \item \textbf{Persistence}: the high score is read from \file{highestScore.txt} when
+        \file{scoreboard.py} is imported, and written whenever a game ends.
+\end{itemize}
+
+\section{Honest assessment}
+
+Every finding below was confirmed by \textbf{running} the project's real modules, not by
+reading them. The Deep Dive has the evidence and the traces.
+
+\begin{honest}{The five real defects}
+\begin{enumerate}
+  \item \textbf{A ghost block scores a free point on frame one of every game.} When the wall
+        runs out of room, the last block is left at its default position, the origin, and
+        appended to \code{all\_blocks} anyway; \code{make\_all\_blocks()} hides it but never
+        removes it. The ball also starts at the origin, so it collides immediately: the
+        player gets a free point, the ball launches \emph{downward} instead of up, and a
+        steel-blue particle burst fires from the middle of the screen. Every symptom looks
+        like a feature if you have not read the code.
+  \item \textbf{A first run starts the high score at 1.} \code{score = open(...).write("0")}
+        assigns \code{write()}'s \emph{return value}, which is the number of characters
+        written. The README claims this branch starts the score at 0.
+  \item \textbf{The bottom wall is unreachable.} It bounces at \code{y < -290}, but the
+        life-lost check fires at \code{y < -280} and the ball moves at most 2.6 units per
+        frame. The README says the ball bounces off all four walls; it bounces off three.
+  \item \textbf{The double collision check does nothing.} \file{main.py} calls
+        \code{check\_collision\_ball()} twice per frame, apparently against tunnelling, but
+        both calls test position rather than the swept path, and a 2.6-unit step against a
+        35-unit radius cannot tunnel anyway. It can, however, destroy two blocks in one frame
+        and flip \code{dy} twice, cancelling the bounce out.
+  \item \textbf{Two of the seven row colours are unreachable.} The geometry allows exactly
+        five rows, so \code{'medium purple'} never appears and \code{'steel blue'} only ever
+        colours the ghost block. The comment about cycling colours describes a case that
+        cannot happen.
+\end{enumerate}
+\end{honest}
+
+\begin{honest}{The design gap that matters most}
+The paddle is a perfect mirror: \code{dy} flips and \code{dx} is never touched, so
+\emph{where} the ball hits the paddle has no effect. In real Breakout, angling the ball off
+the paddle's edge is the entire skill of the game. Here the player cannot aim, which means
+there is no strategy to play, only survival. Deriving \code{dx} from the strike offset is a
+handful of lines and is the highest-value change available to the project.
+
+Related, and cheaper: there is no frame-rate limiter and no delta-time scaling, so the game
+literally runs faster on a faster computer, and the tuned constants mean nothing in absolute
+terms.
+\end{honest}
+
+\begin{honest}{Documentation drift}
+The README quotes ``279 lines'' (measured: 475), says the game imports \code{time} (nothing
+does; the real imports are \code{turtle}, \code{random} and \code{math}), and describes the
+missing-file high score as 0 (it is 1). The README's judgement is sound, and its ``What I'd
+do differently'' independently identifies three of the genuine weaknesses. The drift is in
+the specifics.
+\end{honest}
+
+\subsection{What it gets right}
+
+\begin{itemize}
+  \item The module split earns itself: each collision rule is a different problem and lives
+        with the object that owns it.
+  \item \code{tracer(0)} plus a manual \code{update()} is the correct, non-obvious way to
+        get frame-based rendering out of turtle.
+  \item Clamp-then-flip shows the author hit the stuck-ball bug and fixed it properly, and
+        the directional paddle test shows the same about the sticky-paddle bug.
+  \item \code{for entry in self.fading[:]} shows real awareness of the
+        mutation-during-iteration hazard, though \code{check\_collision\_ball()} only avoids
+        the same hazard by returning early, which is correct by accident.
+  \item Catching \code{Terminator} so closing the window exits cleanly, rather than dumping
+        a traceback, is a detail most projects this size skip.
+\end{itemize}
+
+\begin{keyidea}{The summary}
+A competent exercise that does what it set out to do: a working game loop, a state machine
+and three kinds of hand-rolled collision detection, with a file structure the author can
+justify. It also ships an invisible block that scores a free point, a high score that starts
+at 1, three walls where the README promises four, and a paddle that cannot be aimed with.
+All are small fixes, and each is a better story told first than discovered by an interviewer.
+\end{keyidea}
+
+\section{Glossary}
+
+\begin{description}[leftmargin=0pt, style=nextline, itemsep=3pt]
+  \item[Game engine] A library that solves the hard parts of a game for you: render loop,
+        sprites, collision, input, physics. This project deliberately uses none.
+  \item[\code{turtle}] Python's standard-library drawing module, built on \code{tkinter}. A
+        cursor you move around a window. Not a game library: no sprites, no collision
+        detection, no frame timing.
+  \item[Frame] One still image of the game. A game draws one, moves everything slightly,
+        draws the next, forever.
+  \item[Game loop] The \code{while True} that runs until the player quits. Each pass is one
+        frame: move, collide, draw.
+  \item[Velocity / \code{dx}, \code{dy}] Speed plus direction, stored as horizontal and
+        vertical change per frame. Moving is addition; bouncing is multiplying one of them
+        by $-1$.
+  \item[Hitbox] An invisible rectangle used for collision maths instead of an object's drawn
+        pixels. This project has none: it substitutes a fixed-radius circle for every block.
+  \item[Tunnelling] When a fast object jumps clean over a thin one between two frames, so a
+        position-based collision test never sees the overlap. Impossible at this project's
+        speeds, which is why the defence against it is wasted work.
+  \item[State machine] A design where the program is always in exactly one named state and
+        moves between them on defined events. Here: one string, four states, two key events.
+  \item[Persistence] Keeping data after the process exits, by writing it to a file. The one
+        persisted value here is the high score.
+  \item[\code{Terminator}] The exception \code{turtle} raises when its window is closed.
+        Caught in \file{main.py} so the process exits quietly.
+\end{description}
+
+\end{document}
